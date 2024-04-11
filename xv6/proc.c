@@ -6,7 +6,6 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
-#include "debug.h"
 
 struct {
   struct spinlock lock;
@@ -40,17 +39,15 @@ mycpu(void)
 {
   int apicid, i;
   
-  if(readeflags()&FL_IF){
+  if(readeflags()&FL_IF)
     panic("mycpu called with interrupts enabled\n");
-  }
-
+  
   apicid = lapicid();
   // APIC IDs are not guaranteed to be contiguous. Maybe we should have
   // a reverse map, or reserve a register to store &cpus[i].
   for (i = 0; i < ncpu; ++i) {
-    if (cpus[i].apicid == apicid){
+    if (cpus[i].apicid == apicid)
       return &cpus[i];
-    }
   }
   panic("unknown apicid\n");
 }
@@ -82,9 +79,8 @@ allocproc(void)
   acquire(&ptable.lock);
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == UNUSED){
+    if(p->state == UNUSED)
       goto found;
-    }
 
   release(&ptable.lock);
   return 0;
@@ -94,7 +90,6 @@ found:
   p->pid = nextpid++;
 
   release(&ptable.lock);
-
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
@@ -131,9 +126,8 @@ userinit(void)
   p = allocproc();
   
   initproc = p;
-  if((p->pgdir = setupkvm()) == 0){
+  if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
-  }
   inituvm(p->pgdir, _binary_initcode_start, (int)_binary_initcode_size);
   p->sz = PGSIZE;
   memset(p->tf, 0, sizeof(*p->tf));
@@ -536,5 +530,55 @@ procdump(void)
         cprintf(" %p", pc[i]);
     }
     cprintf("\n");
+  }
+}
+
+void
+exit2(int status)
+{
+  struct proc *curproc = myproc();
+  
+  curproc->xstate = status;
+  exit();
+}
+
+int
+wait2(int *status)
+{
+  struct proc *p;
+  int havekids, pid;
+  struct proc *curproc = myproc();
+    
+  acquire(&ptable.lock);
+  for(;;){
+    havekids = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent != curproc)
+        continue;
+      havekids = 1;
+      if(p->state == ZOMBIE){
+        pid = p->pid;
+        if(status != 0 && copyout(curproc->pgdir, (uint)status, &(p->xstate), sizeof(p->xstate)) < 0) {
+          release(&ptable.lock);
+          return -1;
+        }
+        kfree(p->kstack);
+        p->kstack = 0;
+        p->pid = 0;
+        p->parent = 0;
+        p->name[0] = 0;
+        p->killed = 0;
+        p->state = UNUSED;
+        release(&ptable.lock);
+        return pid;
+      }
+    }
+    
+    if(!havekids || curproc->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+    
+    sleep(curproc, &ptable.lock);
   }
 }
