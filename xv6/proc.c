@@ -542,9 +542,7 @@ exit2(int status)
   exit();
 }
 
-int
-wait2(int *status)
-{
+int wait2(int *status) {
   struct proc *p;
   int havekids, pid;
   struct proc *curproc = myproc();
@@ -573,12 +571,10 @@ wait2(int *status)
         return pid;
       }
     }
-    
     if(!havekids || curproc->killed){
       release(&ptable.lock);
       return -1;
     }
-    
     sleep(curproc, &ptable.lock);
   }
 }
